@@ -190,12 +190,3 @@ def build_albert(token_num,
     for layer in model.layers:
         layer.trainable = _trainable(layer)
     return inputs, transformed
-
-
-if __name__ == '__main__':
-    _model = build_albert(30000)
-    _model.summary()
-    keras.utils.plot_model(_model, show_shapes=True, to_file='train.jpg')
-    _model = keras.models.Model(*build_albert(30000, training=False))
-    _model.summary()
-    keras.utils.plot_model(_model, show_shapes=True, to_file='infer.jpg')
