@@ -1,5 +1,12 @@
+import os
+import json
+
+import tensorflow as tf
+import numpy as np
+
 from keras_bert.backend import keras
-from keras_bert import gelu, get_custom_objects as get_bert_custom_objects
+from keras_bert.activations.gelu_fallback import gelu
+from keras_bert import get_custom_objects as get_bert_custom_objects
 from keras_bert.layers import Masked, Extract
 from keras_pos_embd import PositionEmbedding
 from keras_layer_normalization import LayerNormalization
@@ -8,7 +15,10 @@ from keras_position_wise_feed_forward import FeedForward
 from keras_adaptive_softmax import AdaptiveEmbedding, AdaptiveSoftmax
 
 
-__all__ = ['get_custom_objects', 'build_albert']
+__all__ = [
+    'get_custom_objects', 'build_albert',
+    'load_brightmart_albert_zh_checkpoint',
+]
 
 
 def get_custom_objects():
@@ -190,3 +200,112 @@ def build_albert(token_num,
     for layer in model.layers:
         layer.trainable = _trainable(layer)
     return inputs, transformed
+
+
+def load_brightmart_albert_zh_checkpoint(checkpoint_path, **kwargs):
+    """Load checkpoint from https://github.com/brightmart/albert_zh
+
+    :param checkpoint_path: path to checkpoint folder.
+    :param kwargs: arguments for albert model.
+    :return:
+    """
+    config = {}
+    for file_name in os.listdir(checkpoint_path):
+        if file_name.startswith('albert_config'):
+            with open(os.path.join(checkpoint_path, file_name)) as reader:
+                config = json.load(reader)
+            break
+
+    def _set_if_not_existed(key, value):
+        if key not in kwargs:
+            kwargs[key] = value
+
+    _set_if_not_existed('training', True)
+    training = kwargs['training']
+    _set_if_not_existed('token_num', config['vocab_size'])
+    _set_if_not_existed('pos_num', config['max_position_embeddings'])
+    _set_if_not_existed('seq_len', config['max_position_embeddings'])
+    _set_if_not_existed('embed_dim', config['embedding_size'])
+    _set_if_not_existed('hidden_dim', config['hidden_size'])
+    _set_if_not_existed('transformer_num', config['num_hidden_layers'])
+    _set_if_not_existed('head_num', config['num_attention_heads'])
+    _set_if_not_existed('feed_forward_dim', config['intermediate_size'])
+    _set_if_not_existed('dropout_rate', config['hidden_dropout_prob'])
+    _set_if_not_existed('feed_forward_activation', config['hidden_act'])
+
+    model = build_albert(**kwargs)
+    if not training:
+        inputs, outputs = model
+        model = keras.models.Model(inputs, outputs)
+
+    def _checkpoint_loader(checkpoint_file):
+        def _loader(name):
+            return tf.train.load_variable(checkpoint_file, name)
+        return _loader
+
+    loader = _checkpoint_loader(
+        os.path.join(checkpoint_path, 'albert_model.ckpt'))
+
+    model.get_layer(name='Embed-Token').set_weights([
+        loader('bert/embeddings/word_embeddings'),
+        loader('bert/embeddings/word_embeddings_2'),
+    ])
+    model.get_layer(name='Embed-Segment').set_weights([
+        loader('bert/embeddings/token_type_embeddings'),
+    ])
+    model.get_layer(name='Embedding-Position').set_weights([
+        loader('bert/embeddings/position_embeddings'),
+    ])
+    model.get_layer(name='Embedding-Norm').set_weights([
+        loader('bert/embeddings/LayerNorm/gamma'),
+        loader('bert/embeddings/LayerNorm/beta'),
+    ])
+
+    model.get_layer(name='Attention').set_weights([
+        loader('bert/encoder/layer_shared/attention/self/query/kernel'),
+        loader('bert/encoder/layer_shared/attention/self/query/bias'),
+        loader('bert/encoder/layer_shared/attention/self/key/kernel'),
+        loader('bert/encoder/layer_shared/attention/self/key/bias'),
+        loader('bert/encoder/layer_shared/attention/self/value/kernel'),
+        loader('bert/encoder/layer_shared/attention/self/value/bias'),
+        loader('bert/encoder/layer_shared/attention/output/dense/kernel'),
+        loader('bert/encoder/layer_shared/attention/output/dense/bias'),
+    ])
+    model.get_layer(name='Attention-Normal').set_weights([
+        loader('bert/encoder/layer_shared/attention/output/LayerNorm/gamma'),
+        loader('bert/encoder/layer_shared/attention/output/LayerNorm/beta'),
+    ])
+    model.get_layer(name='Feed-Forward').set_weights([
+        loader('bert/encoder/layer_shared/intermediate/dense/kernel'),
+        loader('bert/encoder/layer_shared/intermediate/dense/bias'),
+        loader('bert/encoder/layer_shared/output/dense/kernel'),
+        loader('bert/encoder/layer_shared/output/dense/bias'),
+    ])
+    model.get_layer(name='Feed-Forward-Normal').set_weights([
+        loader('bert/encoder/layer_shared/output/LayerNorm/gamma'),
+        loader('bert/encoder/layer_shared/output/LayerNorm/beta'),
+    ])
+
+    if training:
+        model.get_layer(name='MLM-Dense').set_weights([
+            loader('cls/predictions/transform/dense/kernel'),
+            loader('cls/predictions/transform/dense/bias'),
+        ])
+        model.get_layer(name='MLM-Norm').set_weights([
+            loader('cls/predictions/transform/LayerNorm/gamma'),
+            loader('cls/predictions/transform/LayerNorm/beta'),
+        ])
+        model.get_layer(name='MLM-Sim').set_weights([
+            loader('cls/predictions/output_bias'),
+        ])
+
+        model.get_layer(name='SOP-Dense').set_weights([
+            loader('bert/pooler/dense/kernel'),
+            loader('bert/pooler/dense/bias'),
+        ])
+        model.get_layer(name='SOP').set_weights([
+            np.transpose(loader('cls/seq_relationship/output_weights')),
+            loader('cls/seq_relationship/output_bias'),
+        ])
+
+    return model
