@@ -20,3 +20,15 @@ class TestALBERT(unittest.TestCase):
         model = keras.models.load_model('infer.h5',
                                         custom_objects=get_custom_objects())
         model.summary()
+
+    def test_build_select_output_layer(self):
+        model = build_albert(346, output_layers=-10, training=False)
+        model.compile('adam', 'sparse_categorical_crossentropy')
+        model.summary()
+
+    def test_build_output_layers(self):
+        model = build_albert(346,
+                             output_layers=[-1, -2, -3, -4],
+                             training=False)
+        model.compile('adam', 'sparse_categorical_crossentropy')
+        model.summary()

@@ -40,7 +40,8 @@ def build_albert(token_num,
                  attention_activation=None,
                  feed_forward_activation='gelu',
                  training=True,
-                 trainable=None):
+                 trainable=None,
+                 output_layers=None):
     """Get ALBERT model.
 
     See: https://arxiv.org/pdf/1909.11942.pdf
@@ -62,6 +63,7 @@ def build_albert(token_num,
                      if it is `True`, otherwise the input layers and the last
                      feature extraction layer will be returned.
     :param trainable: Whether the model is trainable.
+    :param output_layers: A list of indices of output layers.
     """
     if attention_activation == 'gelu':
         attention_activation = gelu
@@ -137,6 +139,7 @@ def build_albert(token_num,
     feed_forward_normal = LayerNormalization(name='Feed-Forward-Normal')
 
     transformed = embed_layer
+    transformed_layers = []
     for i in range(transformer_num):
         attention_input = transformed
         transformed = attention_layer(transformed)
@@ -161,6 +164,7 @@ def build_albert(token_num,
             name='Feed-Forward-Add-{}'.format(i + 1),
         )([feed_forward_input, transformed])
         transformed = feed_forward_normal(transformed)
+        transformed_layers.append(transformed)
 
     if training:
         # Build tasks
@@ -195,6 +199,17 @@ def build_albert(token_num,
             outputs=[masked_layer, nsp_pred_layer])
         for layer in model.layers:
             layer.trainable = _trainable(layer)
+        return model
+    if output_layers is not None:
+        if isinstance(output_layers, list):
+            output_layers = [
+                transformed_layers[index] for index in output_layers]
+            output = keras.layers.Concatenate(
+                name='Output',
+            )(output_layers)
+        else:
+            output = transformed_layers[output_layers]
+        model = keras.models.Model(inputs=inputs, outputs=output)
         return model
     model = keras.models.Model(inputs=inputs, outputs=transformed)
     for layer in model.layers:
