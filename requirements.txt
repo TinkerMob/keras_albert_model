@@ -1,4 +1,3 @@
 numpy
-tensorflow
 keras-bert
 keras-adaptive-softmax
