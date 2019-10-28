@@ -11,7 +11,11 @@ python setup.py install
 or
 
 ```bash
+# Install latest version:
 pip install git+https://github.com/TinkerMob/keras_albert_model.git
+
+# Install specific version:
+pip install git+https://github.com/TinkerMob/keras_albert_model.git@v0.1.0
 ```
 
 Current versions of dependencies:
